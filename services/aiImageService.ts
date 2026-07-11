@@ -104,6 +104,33 @@ const backgroundInstruction = (bg: BackgroundColor): string => {
   }
 };
 
+// Words that add no visual meaning — dropped so the subject reads cleanly.
+const NOISE_WORDS = new Set([
+  'a', 'an', 'the', 'of', 'and', 'or', 'for', 'to', 'in', 'on', 'with', 'about',
+  'vs', 'using', 'via', 'from', 'into', 'at', 'by',
+]);
+
+/**
+ * Clean the raw topic into a tidy subject line: collapse whitespace, drop
+ * duplicate words (e.g. "root … root") and connective noise, keep meaningful
+ * order. This is the "data parse" that feeds a coherent image prompt.
+ */
+export const cleanSubject = (raw: string): string => {
+  const seen = new Set<string>();
+  const words = raw
+    .replace(/[_/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((w) => {
+      const k = w.toLowerCase();
+      if (!k || NOISE_WORDS.has(k) || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  return words.join(' ') || raw.trim();
+};
+
 export const buildImagePrompt = (
   title: string,
   facts: string[],
@@ -113,18 +140,34 @@ export const buildImagePrompt = (
   backgroundColor: BackgroundColor,
   language: Language
 ): string => {
-  const factList = facts.map((f, i) => `${i + 1}. ${f}`).join('\n');
+  const subject = cleanSubject(title);
+  const hasFacts = facts && facts.length > 0;
+  const labelLang = language !== 'English' ? ` (any labels in ${language})` : '';
+
+  // With real facts → an organized infographic. Without → a rich, accurate
+  // illustration of the subject (so a terse/typo query still yields a strong image).
+  const body = hasFacts
+    ? [
+        `A clear, information-rich infographic illustration explaining "${subject}".`,
+        `Depict these key points as distinct labeled callouts${labelLang}:`,
+        facts.map((f, i) => `${i + 1}. ${f}`).join('\n'),
+        'Arrange them around a central diagram of the subject with connecting lines and small icons.',
+      ]
+    : [
+        `A detailed, accurate scientific illustration of "${subject}".`,
+        'Show the subject as a clean labeled diagram: clearly rendered structures, a few short annotation labels, and explanatory icons or cross-sections where relevant.',
+      ];
+
   return [
-    `Create a detailed, information-dense infographic poster about "${title}".`,
-    `Incorporate and visually organize these researched facts (labels in ${language}):`,
-    factList,
+    ...body,
     '',
     levelInstruction(level),
     styleInstruction(style),
     colorInstruction(colorScheme),
     backgroundInstruction(backgroundColor),
     '',
-    'Layout: clear title header, numbered/segmented sections, icons and diagrams, legible labels. Do not include citations or watermarks.',
+    'Quality: highly detailed, sharp focus, accurate proportions, clean and uncluttered composition, professional poster quality, crisp readable text.',
+    'Avoid: watermarks, signatures, logos, garbled or gibberish text, distorted or duplicated letters, blurry artifacts.',
   ].join('\n');
 };
 

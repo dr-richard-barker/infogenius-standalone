@@ -3,6 +3,19 @@
 All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] — 2026-07-11
+
+### Changed
+- **Much richer image prompts.** The prompt builder now cleans the raw topic (collapses whitespace,
+  drops duplicate words like "root … root" and connective noise) and composes a coherent scene:
+  a fact-driven infographic when on-topic research exists, or a detailed labeled scientific illustration
+  otherwise. Adds explicit quality guidance and an "avoid gibberish text / watermarks" negative prompt.
+- Applies to both the free (Pollinations) and bring-your-own-key (Gemini) image engines.
+
+### Notes
+- `enhance=true` on the free endpoint was evaluated but rejected — it added ~40s latency with no
+  reliable quality gain; prompt quality is now handled deterministically in-app instead.
+
 ## [1.2.0] — 2026-07-11
 
 ### Fixed
