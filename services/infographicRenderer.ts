@@ -296,7 +296,12 @@ export const renderInfographicSVG = (spec: InfographicSpec): string => {
   const accentB = variant % 2 === 1 ? pal.accent : pal.accent2;
 
   const P = 64;
-  const items = facts.slice(0, 6);
+  // Fall back to a friendly note if research found no encyclopedic facts, so the
+  // layout never divides by zero and the poster still reads sensibly.
+  const items = (facts.length
+    ? facts
+    : ['No encyclopedic summary was found for this topic — this visual was generated directly from your search text.']
+  ).slice(0, 6);
   const cols = items.length <= 3 ? 1 : 2;
   const rows = Math.ceil(items.length / cols);
 

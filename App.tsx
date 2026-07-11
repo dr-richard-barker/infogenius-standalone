@@ -69,6 +69,7 @@ const App: React.FC = () => {
   const [loadingStep, setLoadingStep] = useState<number>(0);
   const [loadingFacts, setLoadingFacts] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const [imageHistory, setImageHistory] = useState<GeneratedImage[]>([]);
   const [currentSearchResults, setCurrentSearchResults] = useState<SearchResultItem[]>([]);
@@ -154,9 +155,9 @@ const App: React.FC = () => {
   const hasKey = aiConfig.apiKey.trim().length > 0;
 
   // Render the always-available deterministic SVG infographic.
-  const renderSvg = (researchTitle: string, facts: string[], sourceCount: number, variant = 0): string =>
+  const renderSvg = (svgTitle: string, facts: string[], sourceCount: number, variant = 0): string =>
     renderInfographic({
-      title: researchTitle,
+      title: svgTitle,
       facts,
       level: complexityLevel,
       style: visualStyle,
@@ -167,24 +168,27 @@ const App: React.FC = () => {
       variant,
     });
 
-  // Compose an image for a research result according to the selected engine.
-  // Every path keeps the deterministic SVG as an on-error fallback, so the app
-  // ALWAYS shows something even if a remote image service is unreachable.
+  // Compose an image according to the selected engine.
+  //  - The AI image engines always illustrate the user's own `topic` text (never a
+  //    tangential article title), so the picture matches what they asked for.
+  //  - `facts` are only the ON-TOPIC research facts (the caller passes [] when the
+  //    Wikipedia match is weak), so a loosely-related article can't pollute the image.
+  //  - Every path keeps the deterministic SVG as an on-error fallback.
   const composeImage = async (
-    researchTitle: string,
+    svgTitle: string,
+    topic: string,
     facts: string[],
-    label: string,
     sourceCount: number,
-    seedText = label
+    seedText = topic
   ): Promise<GeneratedImage> => {
-    const svg = renderSvg(researchTitle, facts, sourceCount);
+    const svg = renderSvg(svgTitle, facts, sourceCount);
     let data = svg;
     let fallback: string | undefined;
 
     if (imageEngine === 'free-ai') {
       // Keyless real AI image (Pollinations) shown via <img src>; SVG is the fallback.
       data = buildFreeImageUrl(
-        researchTitle, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language, seedFrom(seedText)
+        topic, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language, seedFrom(seedText)
       );
       fallback = svg;
     } else if (imageEngine === 'byok-ai') {
@@ -193,7 +197,7 @@ const App: React.FC = () => {
       } else {
         try {
           const prompt = buildImagePrompt(
-            researchTitle, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language
+            topic, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language
           );
           data = await generateAiImage(aiConfig.apiKey, aiConfig.model, prompt);
         } catch (err: any) {
@@ -207,7 +211,7 @@ const App: React.FC = () => {
       id: Date.now().toString(),
       data,
       fallback,
-      prompt: label,
+      prompt: topic,
       timestamp: Date.now(),
       level: complexityLevel,
       style: visualStyle,
@@ -215,8 +219,17 @@ const App: React.FC = () => {
       backgroundColor,
       language,
       facts,
-      title: researchTitle,
+      title: svgTitle,
     };
+  };
+
+  // Is the researched article actually about the user's topic? (Guards against the
+  // fallback cascade surfacing a loosely-related article for a niche query.)
+  const isOnTopic = (topic: string, title: string): boolean => {
+    const toks = topic.toLowerCase().split(/\W+/).filter((w) => w.length >= 4);
+    if (toks.length === 0) return true;
+    const t = (title || '').toLowerCase();
+    return toks.some((w) => t.includes(w));
   };
 
   const uploadToGitHub = async (
@@ -375,10 +388,11 @@ const App: React.FC = () => {
 
       try {
         const research = await researchTopic(items[i].description, complexityLevel, language);
+        const onTopic = research.searchResults.length > 0 && isOnTopic(items[i].description, research.title);
         const newImage = await composeImage(
-          research.title,
-          research.facts,
+          onTopic ? research.title : items[i].description,
           items[i].description,
+          onTopic ? research.facts : [],
           research.searchResults.length
         );
 
@@ -412,6 +426,7 @@ const App: React.FC = () => {
 
     setIsLoading(true);
     setError(null);
+    setNotice(null);
     setLoadingStep(1);
     setLoadingFacts([]);
     setCurrentSearchResults([]);
@@ -419,16 +434,27 @@ const App: React.FC = () => {
 
     try {
       const research = await researchTopic(topic, complexityLevel, language);
-      setLoadingFacts(research.facts);
+      const onTopic = research.searchResults.length > 0 && isOnTopic(topic, research.title);
+      const factsForVisual = onTopic ? research.facts : [];
+      const svgTitle = onTopic ? research.title : topic;
+
+      setLoadingFacts(factsForVisual);
       setCurrentSearchResults(research.searchResults);
+      if (!onTopic) {
+        setNotice(
+          research.searchResults.length === 0
+            ? `No Wikipedia article matched “${topic}”. ${imageEngine === 'svg' ? 'Try broader or corrected keywords for cited facts.' : 'The image was generated directly from your text.'}`
+            : `No close Wikipedia match for “${topic}”. ${imageEngine === 'svg' ? 'Showing your text.' : 'The image reflects your text;'} the listed sources are only loosely related.`
+        );
+      }
 
       setLoadingStep(2);
       setLoadingMessage(imageEngine === 'svg' ? `Composing infographic...` : `Generating AI image...`);
 
       const newImage = await composeImage(
-        research.title,
-        research.facts,
+        svgTitle,
         topic,
+        factsForVisual,
         research.searchResults.length
       );
 
@@ -831,6 +857,13 @@ const App: React.FC = () => {
               <div className="max-w-2xl mx-auto mt-8 p-6 bg-red-100 dark:bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center gap-4 text-red-800 dark:text-red-200">
                 <AlertCircle className="w-6 h-6 flex-shrink-0" />
                 <p className="font-medium">{error}</p>
+              </div>
+            )}
+
+            {notice && !error && !isLoading && (
+              <div className="max-w-2xl mx-auto mt-8 p-4 bg-amber-100 dark:bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-3 text-amber-800 dark:text-amber-200">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <p className="text-sm font-medium">{notice}</p>
               </div>
             )}
 

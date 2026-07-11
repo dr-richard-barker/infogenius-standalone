@@ -3,6 +3,20 @@
 All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] — 2026-07-11
+
+### Fixed
+- Niche/multi-keyword or misspelled topics (e.g. "hsp22 arabidopsis root … tip atlas") no longer
+  hard-fail with "No articles found". Research now cascades: exact query → spelling suggestion →
+  progressively broadened phrase → individual keywords, and **never throws** on an empty result.
+- If no encyclopedic article matches, the app still generates the image directly from your text
+  instead of aborting. The SVG renderer handles zero facts (previously divided by zero → blank image).
+
+### Changed
+- AI image engines now always illustrate the user's own topic text, and only use research facts when
+  the matched article is actually on-topic — so a loosely-related Wikipedia hit can't skew the picture.
+- Added a non-blocking amber notice when there is no (or only a loose) Wikipedia match.
+
 ## [1.1.0] — 2026-07-11
 
 ### Added

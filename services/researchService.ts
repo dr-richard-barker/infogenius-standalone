@@ -33,16 +33,78 @@ interface SearchHit {
 
 const api = (lang: string) => `https://${lang}.wikipedia.org/w/api.php`;
 
-/** Find candidate articles for a query. `origin=*` opts into anonymous CORS. */
-const searchArticles = async (query: string, lang: string): Promise<SearchHit[]> => {
-  const url = `${api(lang)}?action=query&list=search&srsearch=${encodeURIComponent(
-    query
-  )}&srlimit=6&format=json&origin=*`;
+interface SearchResponse {
+  hits: SearchHit[];
+  suggestion: string | null;
+}
+
+/**
+ * One Wikipedia search request. `origin=*` opts into anonymous CORS. Also asks for
+ * the engine's "did you mean" suggestion so we can recover from typos.
+ */
+const searchArticles = async (query: string, lang: string): Promise<SearchResponse> => {
+  const url =
+    `${api(lang)}?action=query&list=search&srsearch=${encodeURIComponent(query)}` +
+    `&srlimit=6&srinfo=suggestion&srprop=&format=json&origin=*`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Search failed (${res.status})`);
   const json = await res.json();
-  const hits = json?.query?.search ?? [];
-  return hits.map((h: any) => ({ title: h.title, pageid: h.pageid }));
+  const hits = (json?.query?.search ?? []).map((h: any) => ({ title: h.title, pageid: h.pageid }));
+  const suggestion = json?.query?.searchinfo?.suggestion ?? null;
+  return { hits, suggestion };
+};
+
+/**
+ * Resilient search: real queries (especially niche scientific ones with several
+ * keywords, or a typo) often return nothing for the exact phrase. Cascade:
+ *   1. the full query
+ *   2. the engine's spelling suggestion ("did you mean")
+ *   3. progressively drop trailing words (broaden the phrase)
+ *   4. try each significant word alone, most-specific (longest) first
+ * Returns [] only if every attempt is empty. The FIRST request may throw on a real
+ * network failure, which we let propagate so the UI can say "couldn't reach Wikipedia".
+ */
+const findHits = async (query: string, lang: string): Promise<SearchHit[]> => {
+  const first = await searchArticles(query, lang);
+  if (first.hits.length) return first.hits;
+
+  const tried = new Set<string>([query.toLowerCase()]);
+  const attempt = async (q: string): Promise<SearchHit[] | null> => {
+    const key = q.trim().toLowerCase();
+    if (!key || tried.has(key)) return null;
+    tried.add(key);
+    try {
+      const r = await searchArticles(q, lang);
+      return r.hits.length ? r.hits : null;
+    } catch {
+      return null; // ignore individual fallback failures
+    }
+  };
+
+  // 2. spelling suggestion (recovers "ggplant" -> "eggplant", etc.)
+  if (first.suggestion) {
+    const r = await attempt(first.suggestion);
+    if (r) return r;
+  }
+
+  const words = query.split(/\s+/).filter(Boolean);
+
+  // 3. drop trailing words to broaden (cap the work at a handful of tries)
+  for (let n = words.length - 1; n >= 1; n--) {
+    const r = await attempt(words.slice(0, n).join(' '));
+    if (r) return r;
+  }
+
+  // 4. each significant word alone, longest (most specific) first
+  const singles = [...new Set(words.filter((w) => w.length >= 3))].sort(
+    (a, b) => b.length - a.length
+  );
+  for (const w of singles) {
+    const r = await attempt(w);
+    if (r) return r;
+  }
+
+  return [];
 };
 
 /** Fetch the plain-text intro extract for a specific article. */
@@ -139,43 +201,43 @@ export const researchTopic = async (
 
   let hits: SearchHit[];
   try {
-    hits = await searchArticles(query, lang);
+    hits = await findHits(query, lang);
   } catch (e) {
     throw new Error(
       'Could not reach Wikipedia. Check your internet connection and try again.'
     );
   }
 
+  // No encyclopedic match anywhere in the cascade — degrade gracefully rather than
+  // fail. The caller can still generate an image directly from the user's text.
   if (hits.length === 0) {
-    throw new Error(`No articles found for "${topic}". Try rephrasing the topic.`);
+    return { title: query, facts: [], summary: '', searchResults: [] };
   }
 
   // Best match = first hit. Pull its extract; if empty, fall back to the next hit.
   let chosen = hits[0];
-  let extract = await fetchExtract(chosen.title, lang);
+  let extract = await fetchExtract(chosen.title, lang).catch(() => '');
   if (!extract && hits[1]) {
     chosen = hits[1];
-    extract = await fetchExtract(chosen.title, lang);
+    extract = await fetchExtract(chosen.title, lang).catch(() => '');
   }
-  if (!extract) {
-    throw new Error(
-      `Found "${chosen.title}" but it had no readable summary. Try a broader topic.`
-    );
-  }
-
-  const facts = summarizeFacts(extract, topic, factCountForLevel(level));
-  const summarySentences = splitSentences(extract).slice(0, 2).join(' ');
 
   // Sources = the related articles surfaced by the search, as real, clickable URLs.
   const searchResults: SearchResultItem[] = hits.slice(0, 6).map((h) => ({
     title: h.title,
     url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(h.title.replace(/ /g, '_'))}`,
   }));
-
-  // De-duplicate by URL (mirrors the old grounding-chunk de-dupe).
   const uniqueResults = Array.from(
     new Map(searchResults.map((item) => [item.url, item])).values()
   );
+
+  // Article found but no readable summary — still return the title + sources.
+  if (!extract) {
+    return { title: chosen.title, facts: [], summary: '', searchResults: uniqueResults };
+  }
+
+  const facts = summarizeFacts(extract, topic, factCountForLevel(level));
+  const summarySentences = splitSentences(extract).slice(0, 2).join(' ');
 
   return {
     title: chosen.title,
