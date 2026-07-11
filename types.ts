@@ -14,6 +14,14 @@ export type BackgroundColor = 'Default' | 'Pure White' | 'Solid Black' | 'Deep N
 
 export type Language = 'English' | 'Spanish' | 'French' | 'German' | 'Mandarin' | 'Japanese' | 'Hindi' | 'Arabic' | 'Portuguese' | 'Russian';
 
+/**
+ * Which engine composes the visual:
+ * - 'svg'     : deterministic in-browser infographic (offline, always works)
+ * - 'free-ai' : real AI image via a keyless public endpoint (Pollinations) — no token
+ * - 'byok-ai' : real AI image via the user's own Gemini API key
+ */
+export type ImageEngine = 'svg' | 'free-ai' | 'byok-ai';
+
 export interface GeneratedImage {
   id: string;
   data: string; // Data URL — SVG (image/svg+xml) produced locally in the browser
@@ -26,6 +34,8 @@ export interface GeneratedImage {
   language?: Language;
   facts?: string[];
   title?: string;
+  /** Deterministic SVG data URL to show if a remote AI image fails to load. */
+  fallback?: string;
 }
 
 export interface SearchResultItem {

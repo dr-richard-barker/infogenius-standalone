@@ -5,9 +5,18 @@
 <!-- After the first Zenodo release, replace the line below with the DOI badge Zenodo gives you: -->
 <!-- [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX) -->
 
-Research any topic and compose a **cited infographic — entirely in your browser.**
-No Google GenAI, no AI Studio, no API key, no server. (An **optional** bring-your-own-key
-path can call the Gemini image API at runtime — see below — but nothing Google is bundled.)
+Research any topic and generate a visual — **entirely in your browser.** No AI Studio, no server.
+
+**Three image engines** (switch with the ✨ dropdown in the toolbar):
+
+| Engine | Needs a key? | What you get |
+| --- | --- | --- |
+| **AI Image · Free** *(default)* | **No — no key, no token** | A real AI-generated image via the public [Pollinations](https://pollinations.ai) endpoint |
+| **Infographic · SVG** | No | A deterministic, offline, vector infographic of the cited facts |
+| **AI Image · Your Key** | Yes (your own Gemini key) | AI raster images + AI editing via Google Gemini |
+
+Research/datamining is always keyless (Wikipedia). If the free image service is ever unreachable,
+the app automatically falls back to the offline SVG infographic, so you always get something.
 
 **Live site:** https://dr-richard-barker.github.io/infogenius-standalone/
 
@@ -60,11 +69,21 @@ The included workflow at `.github/workflows/deploy.yml` builds and publishes to
 `vite.config.ts` uses `base: './'`, so the build works on a Pages project sub-path with
 no extra configuration.
 
-## Optional: AI image generation (bring your own key)
+## Image engines
 
-The default experience is 100% keyless. If you *want* AI-painted raster infographics instead
-of the deterministic SVG, click the ✨ icon in the top bar and paste your own
-[Google Gemini API key](https://aistudio.google.com/apikey):
+- **AI Image · Free (default)** — `services/freeImageService.ts` builds a prompt from the researched
+  facts and points an `<img>` at the keyless [Pollinations](https://pollinations.ai) endpoint. Real
+  AI images, no key and no token. Because the image is cross-origin it is shown by URL and saved via
+  "open in new tab" (it can't be re-encoded to base64 in-browser, so GitHub sync skips these).
+- **Infographic · SVG** — `services/infographicRenderer.ts` composes a deterministic vector infographic
+  of the cited facts. Fully offline; exports as SVG or PNG. This is also the automatic fallback if a
+  remote image fails.
+- **AI Image · Your Key** — see below.
+
+## Optional: bring your own Gemini key
+
+If you *want* Gemini-quality raster images and AI editing, click the ✨ icon in the top bar, paste your own
+[Google Gemini API key](https://aistudio.google.com/apikey), then pick **AI Image · Your Key**:
 
 - The key is stored only in your browser's `localStorage` and is sent only to Google's API,
   only when you generate. It is never bundled in the build, logged, or sent anywhere else.

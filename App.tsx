@@ -13,6 +13,7 @@ import {
   BatchItem,
   ColorScheme,
   BackgroundColor,
+  ImageEngine,
 } from './types';
 import { researchTopic } from './services/researchService';
 import { renderInfographic } from './services/infographicRenderer';
@@ -23,6 +24,7 @@ import {
   generateAiImage,
   editAiImage,
 } from './services/aiImageService';
+import { buildFreeImageUrl, seedFrom } from './services/freeImageService';
 import Infographic from './components/Infographic';
 import Loading from './components/Loading';
 import IntroScreen from './components/IntroScreen';
@@ -56,6 +58,7 @@ const App: React.FC = () => {
   const [showIntro, setShowIntro] = useState(true);
   const [topic, setTopic] = useState('');
   const [complexityLevel, setComplexityLevel] = useState<ComplexityLevel>('High School');
+  const [imageEngine, setImageEngine] = useState<ImageEngine>('free-ai');
   const [visualStyle, setVisualStyle] = useState<VisualStyle>('Default');
   const [colorScheme, setColorScheme] = useState<ColorScheme>('Default');
   const [backgroundColor, setBackgroundColor] = useState<BackgroundColor>('Default');
@@ -122,7 +125,7 @@ const App: React.FC = () => {
     localStorage.setItem('infogenius_gh_config', JSON.stringify(config));
   };
 
-  // Load / save optional AI image config.
+  // Load / save optional AI image config + chosen image engine.
   useEffect(() => {
     const saved = localStorage.getItem('infogenius_ai_config');
     if (saved) {
@@ -132,14 +135,23 @@ const App: React.FC = () => {
         console.error('Failed to parse saved AI config', e);
       }
     }
+    const savedEngine = localStorage.getItem('infogenius_image_engine') as ImageEngine | null;
+    if (savedEngine === 'svg' || savedEngine === 'free-ai' || savedEngine === 'byok-ai') {
+      setImageEngine(savedEngine);
+    }
   }, []);
+
+  const chooseEngine = (engine: ImageEngine) => {
+    setImageEngine(engine);
+    localStorage.setItem('infogenius_image_engine', engine);
+  };
 
   const saveAiConfig = (config: AiImageConfig) => {
     setAiConfig(config);
     localStorage.setItem('infogenius_ai_config', JSON.stringify(config));
   };
 
-  const aiActive = aiConfig.enabled && aiConfig.apiKey.trim().length > 0;
+  const hasKey = aiConfig.apiKey.trim().length > 0;
 
   // Render the always-available deterministic SVG infographic.
   const renderSvg = (researchTitle: string, facts: string[], sourceCount: number, variant = 0): string =>
@@ -155,29 +167,46 @@ const App: React.FC = () => {
       variant,
     });
 
-  // Compose an image for a research result: AI raster if enabled + key present,
-  // otherwise (or on AI failure) the deterministic SVG. Returns a GeneratedImage.
+  // Compose an image for a research result according to the selected engine.
+  // Every path keeps the deterministic SVG as an on-error fallback, so the app
+  // ALWAYS shows something even if a remote image service is unreachable.
   const composeImage = async (
     researchTitle: string,
     facts: string[],
     label: string,
-    sourceCount: number
+    sourceCount: number,
+    seedText = label
   ): Promise<GeneratedImage> => {
-    let data = renderSvg(researchTitle, facts, sourceCount);
-    if (aiActive) {
-      try {
-        const prompt = buildImagePrompt(
-          researchTitle, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language
-        );
-        data = await generateAiImage(aiConfig.apiKey, aiConfig.model, prompt);
-      } catch (err: any) {
-        console.error('AI image generation failed, using SVG fallback:', err);
-        setError(`AI image failed (${err.message}). Showing the built-in SVG instead.`);
+    const svg = renderSvg(researchTitle, facts, sourceCount);
+    let data = svg;
+    let fallback: string | undefined;
+
+    if (imageEngine === 'free-ai') {
+      // Keyless real AI image (Pollinations) shown via <img src>; SVG is the fallback.
+      data = buildFreeImageUrl(
+        researchTitle, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language, seedFrom(seedText)
+      );
+      fallback = svg;
+    } else if (imageEngine === 'byok-ai') {
+      if (!hasKey) {
+        setError('AI Image (your key) is selected but no Gemini key is set. Showing the SVG — open the ✨ menu to add a key, or switch to "AI Image · Free".');
+      } else {
+        try {
+          const prompt = buildImagePrompt(
+            researchTitle, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language
+          );
+          data = await generateAiImage(aiConfig.apiKey, aiConfig.model, prompt);
+        } catch (err: any) {
+          console.error('AI image generation failed, using SVG fallback:', err);
+          setError(`AI image failed (${err.message}). Showing the built-in SVG instead.`);
+        }
       }
     }
+
     return {
       id: Date.now().toString(),
       data,
+      fallback,
       prompt: label,
       timestamp: Date.now(),
       level: complexityLevel,
@@ -257,13 +286,17 @@ const App: React.FC = () => {
     setIsSyncingAll(true);
     try {
       for (const img of imageHistory) {
+        if (!img.data.startsWith('data:')) continue; // remote free-AI images can't be re-encoded
         const safeName = img.prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 30);
         await uploadToGitHub(img.data, `${safeName}_${img.id}.${extForData(img.data)}`);
       }
 
-      const headers = ['ID', 'Topic', 'Timestamp', 'Complexity', 'Style', 'Color Scheme', 'Background', 'Language', 'Filename'];
+      const headers = ['ID', 'Topic', 'Timestamp', 'Complexity', 'Style', 'Color Scheme', 'Background', 'Language', 'Filename/URL'];
       const rows = imageHistory.map((img) => {
         const safeName = img.prompt.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 30);
+        const fileOrUrl = img.data.startsWith('data:')
+          ? `${safeName}_${img.id}.${extForData(img.data)}`
+          : `"${img.data.replace(/"/g, '""')}"`;
         return [
           img.id,
           `"${img.prompt.replace(/"/g, '""')}"`,
@@ -273,7 +306,7 @@ const App: React.FC = () => {
           img.colorScheme || 'Default',
           img.backgroundColor || 'Default',
           img.language || 'N/A',
-          `${safeName}_${img.id}.${extForData(img.data)}`,
+          fileOrUrl,
         ].join(',');
       });
       const csvContent = [headers.join(','), ...rows].join('\n');
@@ -352,7 +385,7 @@ const App: React.FC = () => {
         setImageHistory((prev) => [newImage, ...prev]);
         setCurrentSearchResults(research.searchResults);
 
-        if (ghConfig.autoSync) {
+        if (ghConfig.autoSync && newImage.data.startsWith('data:')) {
           const safeName = items[i].description.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 30);
           await uploadToGitHub(newImage.data, `${safeName}_${newImage.id}.${extForData(newImage.data)}`);
         }
@@ -390,7 +423,7 @@ const App: React.FC = () => {
       setCurrentSearchResults(research.searchResults);
 
       setLoadingStep(2);
-      setLoadingMessage(aiActive ? `Generating AI image...` : `Composing infographic...`);
+      setLoadingMessage(imageEngine === 'svg' ? `Composing infographic...` : `Generating AI image...`);
 
       const newImage = await composeImage(
         research.title,
@@ -401,7 +434,7 @@ const App: React.FC = () => {
 
       setImageHistory([newImage, ...imageHistory]);
 
-      if (ghConfig.autoSync) {
+      if (ghConfig.autoSync && newImage.data.startsWith('data:')) {
         const safeName = topic.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 30);
         await uploadToGitHub(newImage.data, `${safeName}_${newImage.id}.${extForData(newImage.data)}`);
       }
@@ -414,19 +447,31 @@ const App: React.FC = () => {
     }
   };
 
-  // Edit: AI-edit the raster if this is an AI image + key present; otherwise
-  // deterministically "restyle" the SVG with a variant seeded by the note.
+  // Edit / re-roll the current image, according to how it was produced:
+  //  - free-ai URL  → regenerate with a new seed (a fresh image)
+  //  - byok raster  → real AI edit with the user's key
+  //  - SVG          → deterministic restyle (layout/accent variant)
   const handleEdit = async (editPrompt: string) => {
     if (imageHistory.length === 0) return;
     const current = imageHistory[0];
-    const isRaster = !current.data.startsWith('data:image/svg+xml');
+    const isSvg = current.data.startsWith('data:image/svg+xml');
+    const isFreeAi = current.data.startsWith('http');
     setIsLoading(true);
     setError(null);
     setLoadingStep(2);
 
     try {
-      let data: string;
-      if (isRaster && aiActive) {
+      let data = current.data;
+      let fallback = current.fallback;
+      if (isFreeAi && current.facts && current.title) {
+        setLoadingMessage(`Regenerating image: "${editPrompt}"...`);
+        data = buildFreeImageUrl(
+          current.title, current.facts,
+          current.level || complexityLevel, current.style || visualStyle,
+          current.colorScheme || colorScheme, current.backgroundColor || backgroundColor,
+          current.language || language, seedFrom(current.prompt + editPrompt)
+        );
+      } else if (!isSvg && hasKey) {
         setLoadingMessage(`AI editing: "${editPrompt}"...`);
         data = await editAiImage(aiConfig.apiKey, aiConfig.model, current.data, editPrompt);
       } else {
@@ -448,16 +493,18 @@ const App: React.FC = () => {
           language: current.language || language,
           variant: hashSeed(editPrompt),
         });
+        fallback = undefined;
       }
       const newImage: GeneratedImage = {
         ...current,
         id: Date.now().toString(),
         data,
+        fallback,
         prompt: `${current.prompt} · ${editPrompt}`,
         timestamp: Date.now(),
       };
       setImageHistory([newImage, ...imageHistory]);
-      if (ghConfig.autoSync) {
+      if (ghConfig.autoSync && data.startsWith('data:')) {
         await uploadToGitHub(data, `edited_${newImage.id}.${extForData(data)}`);
       }
     } catch (err: any) {
@@ -517,9 +564,10 @@ const App: React.FC = () => {
                     <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-fuchsia-500/10 text-fuchsia-500 border border-fuchsia-500/30">Optional</span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mb-5 leading-relaxed">
-                    The app works fully <span className="font-semibold">without any key</span> — it renders deterministic SVG infographics.
-                    Optionally, bring your own Google&nbsp;Gemini API key to generate AI raster images instead. Your key is stored
-                    only in this browser and is sent only to Google's API when you generate. It is never bundled, logged, or sent anywhere else.
+                    You don't need this. The <span className="font-semibold">AI Image · Free</span> engine already generates real
+                    images with no key or token. This panel is only for people who want to use their <span className="font-semibold">own
+                    Google&nbsp;Gemini key</span> for higher-quality/edit-capable images. Your key is stored only in this browser and is
+                    sent only to Google's API when you generate — never bundled, logged, or sent anywhere else.
                   </p>
                   <div className="space-y-4">
                     <div>
@@ -531,12 +579,15 @@ const App: React.FC = () => {
                       <input type="text" value={aiConfig.model} onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg p-2 mt-1 text-sm font-mono" placeholder={DEFAULT_AI_MODEL} />
                       <p className="text-[10px] text-slate-500 mt-1">Any image-capable Gemini model your key can access.</p>
                     </div>
-                    <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-white/5">
-                      <input type="checkbox" checked={aiConfig.enabled} onChange={(e) => saveAiConfig({ ...aiConfig, enabled: e.target.checked })} className="w-4 h-4 rounded text-fuchsia-600 focus:ring-fuchsia-500" />
-                      <span className="text-xs font-medium">Use AI image generation (falls back to SVG on error)</span>
-                    </div>
+                    <button
+                      onClick={() => { chooseEngine('byok-ai'); setShowAiSettings(false); }}
+                      disabled={!hasKey}
+                      className="w-full py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm transition-all"
+                    >
+                      Use my key (switch engine to “AI Image · Your Key”)
+                    </button>
                     <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[11px] text-fuchsia-500 hover:opacity-80 flex items-center gap-1.5 font-semibold">
-                      <ExternalLink className="w-3 h-3" /> Get a free Gemini API key
+                      <ExternalLink className="w-3 h-3" /> Get a Gemini API key
                     </a>
                   </div>
                 </div>
@@ -613,7 +664,7 @@ const App: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
-                <button onClick={() => setShowAiSettings(true)} className={`p-2 rounded-lg transition-colors border border-slate-200 dark:border-white/10 ${aiActive ? 'text-fuchsia-600 dark:text-fuchsia-400' : 'text-slate-500'}`} title="AI Image (optional, bring your own key)">
+                <button onClick={() => setShowAiSettings(true)} className={`p-2 rounded-lg transition-colors border border-slate-200 dark:border-white/10 ${imageEngine === 'byok-ai' && hasKey ? 'text-fuchsia-600 dark:text-fuchsia-400' : 'text-slate-500'}`} title="AI Image key (optional, for 'AI Image · Your Key' engine)">
                   <Sparkles className="w-5 h-5" />
                 </button>
                 <button onClick={() => setShowGhSettings(true)} className={`p-2 rounded-lg transition-colors border border-slate-200 dark:border-white/10 ${ghConfig.token ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-500'}`} title="GitHub Settings & Sync">
@@ -688,6 +739,15 @@ const App: React.FC = () => {
                   </div>
 
                   <div className="flex flex-col md:flex-row flex-wrap gap-2 p-2 mt-2">
+                    <div className="flex-1 min-w-[170px] bg-slate-50 dark:bg-slate-950/50 rounded-2xl border border-fuchsia-300/40 dark:border-fuchsia-500/20 px-4 py-3 flex items-center gap-3">
+                      <Wand2 className="w-4 h-4 text-fuchsia-500" />
+                      <select value={imageEngine} onChange={(e) => chooseEngine(e.target.value as ImageEngine)} className="bg-transparent border-none text-sm font-bold w-full focus:ring-0" title="How the visual is produced">
+                        <option value="free-ai">AI Image · Free (no key)</option>
+                        <option value="svg">Infographic · SVG (offline)</option>
+                        <option value="byok-ai">AI Image · Your Key</option>
+                      </select>
+                    </div>
+
                     <div className="flex-1 min-w-[150px] bg-slate-50 dark:bg-slate-950/50 rounded-2xl border border-slate-200 dark:border-white/5 px-4 py-3 flex items-center gap-3">
                       <GraduationCap className="w-4 h-4 text-cyan-600" />
                       <select value={complexityLevel} onChange={(e) => setComplexityLevel(e.target.value as ComplexityLevel)} className="bg-transparent border-none text-sm font-bold w-full focus:ring-0">

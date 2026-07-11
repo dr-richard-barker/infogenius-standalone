@@ -3,6 +3,20 @@
 All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.1.0] — 2026-07-11
+
+### Added
+- **Keyless real AI image generation** via the public Pollinations endpoint
+  (`services/freeImageService.ts`) — no API key and no token required.
+- An **image-engine selector** (AI Image · Free / Infographic · SVG / AI Image · Your Key),
+  persisted in `localStorage`; the free AI image is now the default.
+- Automatic fallback to the offline SVG infographic if a remote image fails to load, plus a
+  loading overlay while a free-AI image renders server-side.
+
+### Changed
+- The bring-your-own-key panel is now clearly optional (the free engine needs no key).
+- GitHub sync and metadata export handle remote image URLs (recorded as URLs; binaries skipped).
+
 ## [1.0.0] — 2026-07-10
 
 ### Added

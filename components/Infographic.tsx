@@ -2,10 +2,10 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GeneratedImage } from '../types';
 import { svgDataUrlToPng } from '../services/infographicRenderer';
-import { Download, Sparkles, Edit3, Maximize2, X, ZoomIn, ZoomOut, FileImage, FileCode2 } from 'lucide-react';
+import { Download, Sparkles, Edit3, Maximize2, X, ZoomIn, ZoomOut, FileImage, FileCode2, ExternalLink, Loader2 } from 'lucide-react';
 
 interface InfographicProps {
   image: GeneratedImage;
@@ -28,6 +28,23 @@ const Infographic: React.FC<InfographicProps> = ({ image, onEdit, isEditing }) =
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rasterizing, setRasterizing] = useState(false);
   const isSvg = image.data.startsWith('data:image/svg+xml');
+  const isRemote = /^https?:/.test(image.data);
+
+  // Remote (free-AI) images generate server-side and can take a few seconds; track
+  // load state and swap to the deterministic SVG fallback if the service fails.
+  const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const [src, setSrc] = useState(image.data);
+  useEffect(() => {
+    setSrc(image.data);
+    setRemoteLoaded(!/^https?:/.test(image.data));
+  }, [image.data]);
+
+  const handleRemoteError = () => {
+    if (image.fallback && src !== image.fallback) {
+      setSrc(image.fallback); // fall back to the offline SVG infographic
+      setRemoteLoaded(true);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +56,11 @@ const Infographic: React.FC<InfographicProps> = ({ image, onEdit, isEditing }) =
   const handleDownloadSvg = () => triggerDownload(image.data, `infographic-${image.id}.svg`);
 
   const handleDownloadPng = async () => {
+    // Cross-origin free-AI images can't be re-encoded in-browser — open in a new tab to save.
+    if (isRemote) {
+      window.open(image.data, '_blank', 'noopener');
+      return;
+    }
     setRasterizing(true);
     try {
       // AI images are already raster PNGs; SVGs are rasterized on the fly.
@@ -70,11 +92,21 @@ const Infographic: React.FC<InfographicProps> = ({ image, onEdit, isEditing }) =
         <div className="absolute bottom-0 right-0 w-16 h-16 border-b-2 border-r-2 border-cyan-500/30 rounded-br-2xl z-20 pointer-events-none"></div>
 
         <img
-          src={image.data}
+          src={src}
           alt={image.prompt}
           onClick={() => setIsFullscreen(true)}
-          className="w-full h-auto object-contain max-h-[80vh] relative z-10 cursor-zoom-in"
+          onLoad={() => setRemoteLoaded(true)}
+          onError={handleRemoteError}
+          className="w-full h-auto object-contain max-h-[80vh] relative z-10 cursor-zoom-in bg-white"
         />
+
+        {/* Loading overlay while a free-AI image renders server-side */}
+        {isRemote && !remoteLoaded && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-100/80 dark:bg-slate-900/80 backdrop-blur-sm">
+            <Loader2 className="w-8 h-8 text-fuchsia-500 animate-spin" />
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Generating AI image…</span>
+          </div>
+        )}
 
         {/* Hover Overlay for Quick Actions */}
         <div className="absolute top-6 right-6 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity z-30">
@@ -86,8 +118,8 @@ const Infographic: React.FC<InfographicProps> = ({ image, onEdit, isEditing }) =
               <FileCode2 className="w-5 h-5" />
             </button>
           )}
-          <button onClick={handleDownloadPng} disabled={rasterizing} className="bg-black/60 backdrop-blur-md text-white p-3 rounded-xl shadow-lg hover:bg-cyan-600 transition-colors border border-white/10 block disabled:opacity-50" title="Download PNG (raster)">
-            {rasterizing ? <Download className="w-5 h-5 animate-pulse" /> : <FileImage className="w-5 h-5" />}
+          <button onClick={handleDownloadPng} disabled={rasterizing} className="bg-black/60 backdrop-blur-md text-white p-3 rounded-xl shadow-lg hover:bg-cyan-600 transition-colors border border-white/10 block disabled:opacity-50" title={isRemote ? 'Open full image in new tab' : 'Download PNG (raster)'}>
+            {isRemote ? <ExternalLink className="w-5 h-5" /> : rasterizing ? <Download className="w-5 h-5 animate-pulse" /> : <FileImage className="w-5 h-5" />}
           </button>
         </div>
       </div>
@@ -160,8 +192,9 @@ const Infographic: React.FC<InfographicProps> = ({ image, onEdit, isEditing }) =
 
           <div className="flex-1 overflow-auto flex items-center justify-center p-4 sm:p-8">
             <img
-              src={image.data}
+              src={src}
               alt={image.prompt}
+              onError={handleRemoteError}
               style={{ transform: `scale(${zoomLevel})`, transition: 'transform 0.2s ease-out' }}
               className="max-w-full max-h-full object-contain shadow-2xl rounded-lg origin-center"
             />
