@@ -29,6 +29,7 @@ import Infographic from './components/Infographic';
 import Loading from './components/Loading';
 import IntroScreen from './components/IntroScreen';
 import SearchResults from './components/SearchResults';
+import FigureDescription from './components/FigureDescription';
 import {
   Search, AlertCircle, History, GraduationCap, Palette, Microscope,
   Atom, Sun, Moon, Github, CheckCircle2, Sparkles, Wand2, ExternalLink,
@@ -97,6 +98,8 @@ const App: React.FC = () => {
     model: DEFAULT_AI_MODEL,
     enabled: false,
   });
+  // Hybrid mode: generate a text-free illustration + a separate copyable legend.
+  const [hybridMode, setHybridMode] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
@@ -140,11 +143,42 @@ const App: React.FC = () => {
     if (savedEngine === 'svg' || savedEngine === 'free-ai' || savedEngine === 'byok-ai') {
       setImageEngine(savedEngine);
     }
+    const savedHybrid = localStorage.getItem('infogenius_hybrid');
+    if (savedHybrid !== null) setHybridMode(savedHybrid === 'true');
   }, []);
 
   const chooseEngine = (engine: ImageEngine) => {
     setImageEngine(engine);
     localStorage.setItem('infogenius_image_engine', engine);
+  };
+
+  const setHybrid = (on: boolean) => {
+    setHybridMode(on);
+    localStorage.setItem('infogenius_hybrid', String(on));
+  };
+
+  // Build the ready-to-copy figure legend from the researched title, facts and sources.
+  const buildLegend = (
+    title: string,
+    facts: string[],
+    sources: SearchResultItem[]
+  ): string => {
+    const lines: string[] = [`Figure. ${title}.`];
+    if (facts.length) {
+      lines.push('');
+      facts.forEach((f, i) => lines.push(`${i + 1}. ${f}`));
+    } else {
+      lines.push('');
+      lines.push('(No encyclopedic summary was found — add your own caption text here.)');
+    }
+    if (sources.length) {
+      lines.push('');
+      lines.push('Sources:');
+      sources.forEach((s) => lines.push(`- ${s.title} — ${s.url}`));
+    }
+    lines.push('');
+    lines.push('Note: the figure image is an AI-generated illustration; verify specifics against the sources above.');
+    return lines.join('\n');
   };
 
   const saveAiConfig = (config: AiImageConfig) => {
@@ -178,26 +212,30 @@ const App: React.FC = () => {
     svgTitle: string,
     topic: string,
     facts: string[],
-    sourceCount: number,
+    sources: SearchResultItem[],
     seedText = topic
   ): Promise<GeneratedImage> => {
-    const svg = renderSvg(svgTitle, facts, sourceCount);
+    // Hybrid: for AI engines, keep the illustration text-free; the legend goes to
+    // the description panel. (SVG has real vector text, so hybrid doesn't apply.)
+    const textFree = imageEngine !== 'svg' && hybridMode;
+    const imageFacts = textFree ? [] : facts;
+    const svg = renderSvg(svgTitle, facts, sources.length);
     let data = svg;
     let fallback: string | undefined;
 
     if (imageEngine === 'free-ai') {
       // Keyless real AI image (Pollinations) shown via <img src>; SVG is the fallback.
       data = buildFreeImageUrl(
-        topic, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language, seedFrom(seedText)
+        topic, imageFacts, complexityLevel, visualStyle, colorScheme, backgroundColor, language, seedFrom(seedText), textFree
       );
       fallback = svg;
     } else if (imageEngine === 'byok-ai') {
       if (!hasKey) {
-        setError('AI Image (your key) is selected but no Gemini key is set. Showing the SVG — open the ✨ menu to add a key, or switch to "AI Image · Free".');
+        setError('AI Image (your key) is selected but no Gemini key is set. Open the ✨ menu to paste your Google Gemini key, or switch to "AI Image · Free".');
       } else {
         try {
           const prompt = buildImagePrompt(
-            topic, facts, complexityLevel, visualStyle, colorScheme, backgroundColor, language
+            topic, imageFacts, complexityLevel, visualStyle, colorScheme, backgroundColor, language, textFree
           );
           data = await generateAiImage(aiConfig.apiKey, aiConfig.model, prompt);
         } catch (err: any) {
@@ -219,7 +257,10 @@ const App: React.FC = () => {
       backgroundColor,
       language,
       facts,
+      sources,
       title: svgTitle,
+      description: buildLegend(svgTitle, facts, sources),
+      textFree: imageEngine !== 'svg' && textFree,
     };
   };
 
@@ -393,7 +434,7 @@ const App: React.FC = () => {
           onTopic ? research.title : items[i].description,
           items[i].description,
           onTopic ? research.facts : [],
-          research.searchResults.length
+          research.searchResults
         );
 
         setImageHistory((prev) => [newImage, ...prev]);
@@ -455,7 +496,7 @@ const App: React.FC = () => {
         svgTitle,
         topic,
         factsForVisual,
-        research.searchResults.length
+        research.searchResults
       );
 
       setImageHistory([newImage, ...imageHistory]);
@@ -489,13 +530,13 @@ const App: React.FC = () => {
     try {
       let data = current.data;
       let fallback = current.fallback;
-      if (isFreeAi && current.facts && current.title) {
+      if (isFreeAi && current.title) {
         setLoadingMessage(`Regenerating image: "${editPrompt}"...`);
         data = buildFreeImageUrl(
-          current.title, current.facts,
+          current.prompt || current.title, current.textFree ? [] : (current.facts || []),
           current.level || complexityLevel, current.style || visualStyle,
           current.colorScheme || colorScheme, current.backgroundColor || backgroundColor,
-          current.language || language, seedFrom(current.prompt + editPrompt)
+          current.language || language, seedFrom(current.prompt + editPrompt), current.textFree
         );
       } else if (!isSvg && hasKey) {
         setLoadingMessage(`AI editing: "${editPrompt}"...`);
@@ -584,37 +625,53 @@ const App: React.FC = () => {
                   <X className="w-5 h-5" />
                 </button>
                 <div className="p-6">
-                  <div className="flex items-center gap-3 mb-2">
+                  <div className="flex items-center gap-3 mb-4">
                     <Wand2 className="w-6 h-6 text-fuchsia-500" />
-                    <h2 className="text-xl font-bold">AI Image Generation</h2>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-fuchsia-500/10 text-fuchsia-500 border border-fuchsia-500/30">Optional</span>
+                    <h2 className="text-xl font-bold">AI Image Options</h2>
                   </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-5 leading-relaxed">
-                    You don't need this. The <span className="font-semibold">AI Image · Free</span> engine already generates real
-                    images with no key or token. This panel is only for people who want to use their <span className="font-semibold">own
-                    Google&nbsp;Gemini key</span> for higher-quality/edit-capable images. Your key is stored only in this browser and is
-                    sent only to Google's API when you generate — never bundled, logged, or sent anywhere else.
-                  </p>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">Gemini API Key</label>
-                      <input type="password" value={aiConfig.apiKey} onChange={(e) => saveAiConfig({ ...aiConfig, apiKey: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg p-2 mt-1 text-sm" placeholder="AIza..." />
+
+                  {/* Hybrid toggle */}
+                  <div className="flex items-start gap-3 p-3 mb-5 bg-fuchsia-50 dark:bg-fuchsia-500/10 rounded-xl border border-fuchsia-200 dark:border-fuchsia-500/20">
+                    <input id="hybridToggle" type="checkbox" checked={hybridMode} onChange={(e) => setHybrid(e.target.checked)} className="w-4 h-4 mt-0.5 rounded text-fuchsia-600 focus:ring-fuchsia-500" />
+                    <label htmlFor="hybridToggle" className="text-xs leading-relaxed cursor-pointer">
+                      <span className="font-bold">Hybrid mode (text-free illustration)</span><br />
+                      Keep words <span className="font-semibold">out of the image</span> so nothing gets garbled, and show the
+                      title, facts and sources as a <span className="font-semibold">copyable figure description</span> below it — add them
+                      to your caption yourself. Applies to both AI image engines.
+                    </label>
+                  </div>
+
+                  <div className="border-t border-slate-200 dark:border-white/10 pt-5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sparkles className="w-4 h-4 text-fuchsia-500" />
+                      <h3 className="text-sm font-bold">Use your own Google Gemini key</h3>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">Image Model</label>
-                      <input type="text" value={aiConfig.model} onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg p-2 mt-1 text-sm font-mono" placeholder={DEFAULT_AI_MODEL} />
-                      <p className="text-[10px] text-slate-500 mt-1">Any image-capable Gemini model your key can access.</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 leading-relaxed">
+                      Optional. Paste a <span className="font-semibold">Google&nbsp;Gemini API key</span> to generate with the same
+                      Gemini image engine as the original app (higher quality + AI editing). Your key is stored only in this browser and
+                      is sent only to Google's API when you generate — never bundled, logged, or sent anywhere else. The free engine needs no key.
+                    </p>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Gemini API Key</label>
+                        <input type="password" value={aiConfig.apiKey} onChange={(e) => saveAiConfig({ ...aiConfig, apiKey: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg p-2 mt-1 text-sm" placeholder="AIza..." />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Image Model</label>
+                        <input type="text" value={aiConfig.model} onChange={(e) => saveAiConfig({ ...aiConfig, model: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-lg p-2 mt-1 text-sm font-mono" placeholder={DEFAULT_AI_MODEL} />
+                        <p className="text-[10px] text-slate-500 mt-1">Defaults to the original app's model. Any image-capable Gemini model your key can access.</p>
+                      </div>
+                      <button
+                        onClick={() => { chooseEngine('byok-ai'); setShowAiSettings(false); }}
+                        disabled={!hasKey}
+                        className="w-full py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm transition-all"
+                      >
+                        Use my key (switch engine to “AI Image · Your Key”)
+                      </button>
+                      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[11px] text-fuchsia-500 hover:opacity-80 flex items-center gap-1.5 font-semibold">
+                        <ExternalLink className="w-3 h-3" /> Get a Gemini API key
+                      </a>
                     </div>
-                    <button
-                      onClick={() => { chooseEngine('byok-ai'); setShowAiSettings(false); }}
-                      disabled={!hasKey}
-                      className="w-full py-2.5 bg-fuchsia-600 hover:bg-fuchsia-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:cursor-not-allowed text-white rounded-xl font-bold text-sm transition-all"
-                    >
-                      Use my key (switch engine to “AI Image · Your Key”)
-                    </button>
-                    <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-[11px] text-fuchsia-500 hover:opacity-80 flex items-center gap-1.5 font-semibold">
-                      <ExternalLink className="w-3 h-3" /> Get a Gemini API key
-                    </a>
                   </div>
                 </div>
               </div>
@@ -870,6 +927,7 @@ const App: React.FC = () => {
             {imageHistory.length > 0 && !isLoading && (
               <>
                 <Infographic image={imageHistory[0]} onEdit={handleEdit} isEditing={isLoading} />
+                <FigureDescription image={imageHistory[0]} />
                 <SearchResults results={currentSearchResults} />
               </>
             )}

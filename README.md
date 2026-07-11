@@ -69,6 +69,13 @@ The included workflow at `.github/workflows/deploy.yml` builds and publishes to
 `vite.config.ts` uses `base: './'`, so the build works on a Pages project sub-path with
 no extra configuration.
 
+## Hybrid mode (default)
+
+AI image models garble small text, so by default the AI engines generate a **text-free illustration**
+and put the title, key facts and sources in a **copyable "Figure Description"** panel below the image —
+paste it into your own caption/legend when you need accurate text. Toggle it in the ✨ **AI Image Options**
+menu. (The SVG engine already renders real vector text, so hybrid doesn't apply there.)
+
 ## Image engines
 
 - **AI Image · Free (default)** — `services/freeImageService.ts` builds a prompt from the researched

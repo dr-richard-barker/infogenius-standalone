@@ -45,7 +45,9 @@ export const buildFreeImageUrl = (
   colorScheme: ColorScheme,
   backgroundColor: BackgroundColor,
   language: Language,
-  seed: number
+  seed: number,
+  /** Hybrid mode: request a text-free illustration (legend supplied separately). */
+  noText = false
 ): string => {
   const prompt = buildImagePrompt(
     title,
@@ -54,7 +56,8 @@ export const buildFreeImageUrl = (
     style,
     colorScheme,
     backgroundColor,
-    language
+    language,
+    noText
   );
   const params = new URLSearchParams({
     width: '1024',

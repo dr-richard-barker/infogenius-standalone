@@ -138,15 +138,22 @@ export const buildImagePrompt = (
   style: VisualStyle,
   colorScheme: ColorScheme,
   backgroundColor: BackgroundColor,
-  language: Language
+  language: Language,
+  /** Hybrid mode: produce a purely visual, text-free illustration (no baked-in labels). */
+  noText = false
 ): string => {
   const subject = cleanSubject(title);
-  const hasFacts = facts && facts.length > 0;
+  const hasFacts = !noText && facts && facts.length > 0;
   const labelLang = language !== 'English' ? ` (any labels in ${language})` : '';
 
-  // With real facts → an organized infographic. Without → a rich, accurate
-  // illustration of the subject (so a terse/typo query still yields a strong image).
-  const body = hasFacts
+  // noText → a clean, wordless illustration (the legend is provided separately).
+  // With facts → an organized infographic. Otherwise → a rich accurate illustration.
+  const body = noText
+    ? [
+        `A detailed, accurate scientific illustration of "${subject}".`,
+        'Render the subject as a clear visual diagram or scene — accurate structures, cross-sections and explanatory visual detail where relevant. No captions or legend (they are added separately).',
+      ]
+    : hasFacts
     ? [
         `A clear, information-rich infographic illustration explaining "${subject}".`,
         `Depict these key points as distinct labeled callouts${labelLang}:`,
@@ -158,17 +165,15 @@ export const buildImagePrompt = (
         'Show the subject as a clean labeled diagram: clearly rendered structures, a few short annotation labels, and explanatory icons or cross-sections where relevant.',
       ];
 
-  return [
-    ...body,
-    '',
-    levelInstruction(level),
-    styleInstruction(style),
-    colorInstruction(colorScheme),
-    backgroundInstruction(backgroundColor),
-    '',
-    'Quality: highly detailed, sharp focus, accurate proportions, clean and uncluttered composition, professional poster quality, crisp readable text.',
-    'Avoid: watermarks, signatures, logos, garbled or gibberish text, distorted or duplicated letters, blurry artifacts.',
-  ].join('\n');
+  const qualityLine = noText
+    ? 'Quality: highly detailed, sharp focus, accurate proportions, clean uncluttered composition, professional illustration quality.'
+    : 'Quality: highly detailed, sharp focus, accurate proportions, clean and uncluttered composition, professional poster quality, crisp readable text.';
+
+  const avoidLine = noText
+    ? 'IMPORTANT — no text: do NOT render any words, letters, numbers, labels, captions, titles or legends anywhere in the image. A purely visual illustration only. Also avoid watermarks, signatures and logos.'
+    : 'Avoid: watermarks, signatures, logos, garbled or gibberish text, distorted or duplicated letters, blurry artifacts.';
+
+  return [...body, '', levelInstruction(level), styleInstruction(style), colorInstruction(colorScheme), backgroundInstruction(backgroundColor), '', qualityLine, avoidLine].join('\n');
 };
 
 // --- REST calls --------------------------------------------------------------

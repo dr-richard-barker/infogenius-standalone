@@ -3,6 +3,21 @@
 All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] — 2026-07-11
+
+### Added
+- **Hybrid mode (default on):** the AI image engines now generate a **text-free illustration** (no
+  baked-in, garbled labels) and present the title, key facts and sources as a **copyable "Figure
+  Description"** panel below the image — paste it into your own caption. Toggle in the ✨ AI Image Options.
+- New `FigureDescription` component with a one-click "Copy text" button; the legend is stored on each
+  history item.
+
+### Changed
+- ✨ menu reworked into **"AI Image Options"**: the hybrid toggle plus a clearer
+  **bring-your-own Google Gemini key** section (same Gemini image engine + model as the original app,
+  `gemini-3-pro-image-preview`) for higher-quality images and AI editing.
+- Text-free prompt path added to `buildImagePrompt` / `buildFreeImageUrl`.
+
 ## [1.3.0] — 2026-07-11
 
 ### Changed

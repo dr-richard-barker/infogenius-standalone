@@ -36,6 +36,12 @@ export interface GeneratedImage {
   title?: string;
   /** Deterministic SVG data URL to show if a remote AI image fails to load. */
   fallback?: string;
+  /** Cited sources, kept with the item for the copyable figure legend. */
+  sources?: SearchResultItem[];
+  /** Ready-to-copy figure legend / description text (title + facts + sources). */
+  description?: string;
+  /** True when the image is a text-free illustration (hybrid mode). */
+  textFree?: boolean;
 }
 
 export interface SearchResultItem {
