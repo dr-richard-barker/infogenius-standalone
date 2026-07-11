@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "InfoGenius — Standalone Visual Knowledge Engine"
+abstract: >-
+  A standalone, keyless, browser-native tool that researches any topic and
+  composes a cited infographic entirely in the browser. Datamining and
+  summarization use the keyless Wikipedia REST + MediaWiki APIs; the infographic
+  is composed by a deterministic in-browser SVG renderer. An optional
+  bring-your-own-key path can call the Google Gemini image API at runtime, but
+  no Google code or credentials are bundled. Deployable as a static GitHub Pages
+  site with no server-side components.
+type: software
+authors:
+  - given-names: Richard
+    family-names: Barker
+    affiliation: "AstroBotany"
+repository-code: "https://github.com/dr-richard-barker/infogenius-standalone"
+url: "https://dr-richard-barker.github.io/infogenius-standalone/"
+license: Apache-2.0
+version: "1.0.0"
+date-released: "2026-07-10"
+keywords:
+  - infographic
+  - science communication
+  - data mining
+  - text summarization
+  - Wikipedia
+  - SVG
+  - data visualization
+  - open science

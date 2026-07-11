@@ -1,0 +1,186 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * researchService — the keyless, browser-native replacement for the old Gemini +
+ * Google Search grounding step.
+ *
+ * It performs the same job the prototype did: given a topic it mines a knowledge
+ * source for facts and returns a summarized set of bullet facts plus the real
+ * source URLs that back them. Instead of a paid LLM it uses the public, CORS-enabled
+ * Wikipedia REST + MediaWiki APIs — no API key, no account, no server.
+ */
+import { ResearchResult, SearchResultItem, Language } from '../types';
+
+// Wikipedia has one wiki per language; map the UI Language to its subdomain code.
+const LANGUAGE_WIKI: Record<Language, string> = {
+  English: 'en',
+  Spanish: 'es',
+  French: 'fr',
+  German: 'de',
+  Mandarin: 'zh',
+  Japanese: 'ja',
+  Hindi: 'hi',
+  Arabic: 'ar',
+  Portuguese: 'pt',
+  Russian: 'ru',
+};
+
+interface SearchHit {
+  title: string;
+  pageid: number;
+}
+
+const api = (lang: string) => `https://${lang}.wikipedia.org/w/api.php`;
+
+/** Find candidate articles for a query. `origin=*` opts into anonymous CORS. */
+const searchArticles = async (query: string, lang: string): Promise<SearchHit[]> => {
+  const url = `${api(lang)}?action=query&list=search&srsearch=${encodeURIComponent(
+    query
+  )}&srlimit=6&format=json&origin=*`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Search failed (${res.status})`);
+  const json = await res.json();
+  const hits = json?.query?.search ?? [];
+  return hits.map((h: any) => ({ title: h.title, pageid: h.pageid }));
+};
+
+/** Fetch the plain-text intro extract for a specific article. */
+const fetchExtract = async (title: string, lang: string): Promise<string> => {
+  const url =
+    `${api(lang)}?action=query&prop=extracts&exintro=1&explaintext=1&redirects=1` +
+    `&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Extract failed (${res.status})`);
+  const json = await res.json();
+  const pages = json?.query?.pages ?? {};
+  const first: any = Object.values(pages)[0];
+  return (first?.extract as string) || '';
+};
+
+/** Split prose into clean sentences, discarding fragments and residual markup. */
+const splitSentences = (text: string): string[] => {
+  const cleaned = text
+    .replace(/\s+/g, ' ')
+    .replace(/\([^)]*\)/g, ' ') // drop parenthetical asides (pronunciations, dates)
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Split on sentence terminators followed by a space + capital / digit.
+  const raw = cleaned.split(/(?<=[.!?])\s+(?=[A-Z0-9À-ɏ])/);
+  return raw
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 30 && s.length <= 320 && /[a-zÀ-ɏ]/i.test(s));
+};
+
+/**
+ * Extractive summarizer: rank sentences by information signals (position, length,
+ * presence of topic terms and numbers) and take the strongest N. This is the
+ * deterministic, local stand-in for the LLM's "FACTS:" list.
+ */
+const summarizeFacts = (text: string, topic: string, maxFacts: number): string[] => {
+  const sentences = splitSentences(text);
+  if (sentences.length === 0) return [];
+
+  const topicTerms = topic
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((w) => w.length > 3);
+
+  const scored = sentences.map((sentence, index) => {
+    const lower = sentence.toLowerCase();
+    let score = 0;
+    // Lead sentences carry the definition — weight earlier ones higher.
+    score += Math.max(0, 6 - index) * 1.5;
+    // Topic relevance.
+    topicTerms.forEach((t) => {
+      if (lower.includes(t)) score += 2;
+    });
+    // Concrete facts often contain numbers / dates / units.
+    if (/\d/.test(sentence)) score += 1.5;
+    // Prefer medium-length, well-formed sentences.
+    if (sentence.length > 60 && sentence.length < 200) score += 1;
+    return { sentence, index, score };
+  });
+
+  // Take the top-scoring sentences, then restore original reading order.
+  const top = [...scored]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxFacts)
+    .sort((a, b) => a.index - b.index)
+    .map((s) => s.sentence);
+
+  return top;
+};
+
+/** How many facts to surface for a given audience complexity. */
+const factCountForLevel = (level: string): number => {
+  switch (level) {
+    case 'Elementary':
+      return 3;
+    case 'High School':
+      return 4;
+    case 'College':
+      return 5;
+    case 'Expert':
+      return 6;
+    default:
+      return 4;
+  }
+};
+
+export const researchTopic = async (
+  topic: string,
+  level: string,
+  language: Language
+): Promise<ResearchResult> => {
+  const lang = LANGUAGE_WIKI[language] ?? 'en';
+  const query = topic.trim();
+  if (!query) throw new Error('Please enter a topic to research.');
+
+  let hits: SearchHit[];
+  try {
+    hits = await searchArticles(query, lang);
+  } catch (e) {
+    throw new Error(
+      'Could not reach Wikipedia. Check your internet connection and try again.'
+    );
+  }
+
+  if (hits.length === 0) {
+    throw new Error(`No articles found for "${topic}". Try rephrasing the topic.`);
+  }
+
+  // Best match = first hit. Pull its extract; if empty, fall back to the next hit.
+  let chosen = hits[0];
+  let extract = await fetchExtract(chosen.title, lang);
+  if (!extract && hits[1]) {
+    chosen = hits[1];
+    extract = await fetchExtract(chosen.title, lang);
+  }
+  if (!extract) {
+    throw new Error(
+      `Found "${chosen.title}" but it had no readable summary. Try a broader topic.`
+    );
+  }
+
+  const facts = summarizeFacts(extract, topic, factCountForLevel(level));
+  const summarySentences = splitSentences(extract).slice(0, 2).join(' ');
+
+  // Sources = the related articles surfaced by the search, as real, clickable URLs.
+  const searchResults: SearchResultItem[] = hits.slice(0, 6).map((h) => ({
+    title: h.title,
+    url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(h.title.replace(/ /g, '_'))}`,
+  }));
+
+  // De-duplicate by URL (mirrors the old grounding-chunk de-dupe).
+  const uniqueResults = Array.from(
+    new Map(searchResults.map((item) => [item.url, item])).values()
+  );
+
+  return {
+    title: chosen.title,
+    facts: facts.length > 0 ? facts : [summarySentences],
+    summary: summarySentences,
+    searchResults: uniqueResults,
+  };
+};
