@@ -94,6 +94,16 @@ produce an infographic — **without any Google GenAI / AI Studio dependency and
 - [x] Created **v1.0.0** GitHub release (the archival unit Zenodo picks up)
 - [ ] USER ACTION: enable this repo on Zenodo (zenodo.org/account/settings/github), then add the DOI badge
 
+### 9. Phase 3 — keyless real AI images (user: "generate images without tokens")
+- [x] Diagnosed: default SVG path worked (Wikipedia 200, img rendered) — user wanted real *images*, not SVG
+- [x] Verified keyless option: Pollinations loads real images via `<img src>` (fetch is Turnstile-gated, img is not)
+- [x] `services/freeImageService.ts` — keyless Pollinations URL builder (reuses `buildImagePrompt`)
+- [x] Engine selector (free-ai default / svg / byok-ai), persisted; auto SVG fallback on remote error
+- [x] Loading overlay for remote images; download opens remote in new tab; sync/export handle URLs
+- [x] Verified live: free-ai loads a real image (886×665, no key); svg engine still renders; no console errors
+- [x] Built, committed, pushed; deploy workflow green; **live bundle hash matches local build**
+- [x] Cut **v1.1.0** release
+
 ## Progress log
 - 2026-07-10: Analyzed prototype source; wrote this plan; scaffolded standalone app.
 - 2026-07-10: Built Wikipedia research service + deterministic SVG renderer; rewired App/components.
