@@ -83,9 +83,22 @@ produce an infographic — **without any Google GenAI / AI Studio dependency and
 
 ---
 
+### 8. Phase 2 — BYO-key AI images, cleanup, deploy, Zenodo
+- [x] Optional BYO-key AI image path `services/aiImageService.ts` (pure REST, no `@google/genai` bundled)
+- [x] AI settings modal (key + model + enable), key stored in localStorage; falls back to SVG on error
+- [x] Wired into generate/batch/edit; SVG↔PNG-aware download, GitHub sync, and file extensions
+- [x] Removed the cloned Google-GenAI prototype (`infogenius_src`); confirmed no genai package/imports
+- [x] Zenodo packaging: `LICENSE` (Apache-2.0), `CITATION.cff`, `.zenodo.json`, `CHANGELOG.md`, README section
+- [x] Deployed: pushed to **dr-richard-barker/infogenius-standalone**, Pages (Actions) enabled, workflow green
+- [x] Live + verified 200: https://dr-richard-barker.github.io/infogenius-standalone/
+- [x] Created **v1.0.0** GitHub release (the archival unit Zenodo picks up)
+- [ ] USER ACTION: enable this repo on Zenodo (zenodo.org/account/settings/github), then add the DOI badge
+
 ## Progress log
 - 2026-07-10: Analyzed prototype source; wrote this plan; scaffolded standalone app.
 - 2026-07-10: Built Wikipedia research service + deterministic SVG renderer; rewired App/components.
 - 2026-07-10: Verified end-to-end in browser (EN + ES). Fixed SVG parse bug (font-family had nested
   double quotes → switched inner quotes to single). Clean build. Added Pages deploy workflow + README.
-- Remaining: user to push to a GitHub repo and enable Pages (Settings → Pages → Source: GitHub Actions).
+- 2026-07-11: Added optional BYO-key Gemini image path (REST, nothing Google bundled). Removed the
+  prototype clone. Added Zenodo files. Deployed to GitHub Pages (live, HTTP 200) and cut v1.0.0 release.
+- Remaining: user connects Zenodo to the repo to mint the DOI, then drops the badge into the README.
